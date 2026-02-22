@@ -1,5 +1,38 @@
 # Changelog
 
+## Version 0.1.1 - Critical Fixes
+
+### Critical Bug Fixes
+
+#### 1. Calibration Bracketing Logic (Fixed) ⚠️
+- **Before**: Bound expansion logic was reversed, causing calibration to fail for extreme rates
+- **After**: Correct bracketing - expands bounds in proper direction
+- **Impact**: Now handles extreme missing rates (1%, 90%) correctly
+
+#### 2. MAR Normalization for 3D Data (Improved)
+- **Before**: Global normalization across all participants
+- **After**: Per-participant normalization for 3D data
+- **Impact**: More consistent MAR behavior across subjects with different scales
+
+#### 3. Base Rate Handling (Fixed)
+- **Before**: `base_rate` could conflict with low `missing_rate`
+- **After**: Automatically capped at `missing_rate * 0.5`
+- **Impact**: Prevents calibration issues with very low missing rates
+
+#### 4. Probability Zeroing (Improved)
+- **Before**: Non-eligible positions handled after sampling
+- **After**: Probabilities zeroed before sampling for cleaner semantics
+- **Impact**: Slightly faster and more explicit logic
+
+### Testing
+
+Added extreme rate testing:
+- Low rates: 1%, 2%, 5% - all within 0.4% of target
+- High rates: 50%, 70%, 90% - all within 1.3% of target
+- MCAR remains exact at all rates
+
+---
+
 ## Version 0.1.0 - Initial Release
 
 ### Key Improvements
@@ -60,3 +93,4 @@ All 17 unit tests pass:
 - Updated docstrings with clearer parameter descriptions
 - Added notes about missing rate being applied to eligible entries
 - Clarified mask semantics (True=observed, False=missing)
+- Added mathematical formulations for each mechanism in README

@@ -49,6 +49,9 @@ def _calibrate_offset(
     
     Automatically expands bounds if needed.
     
+    Assumes compute_rate_fn is monotonically increasing with offset:
+    higher offset → higher probability → higher missing rate
+    
     Parameters
     ----------
     compute_rate_fn : callable
@@ -73,22 +76,22 @@ def _calibrate_offset(
     rate_low = compute_rate_fn(offset_low)
     rate_high = compute_rate_fn(offset_high)
     
-    # Expand lower bound if needed
-    while rate_low < target_rate and offset_low > -100:
+    # If low rate is too HIGH, push offset_low down (decreases rate)
+    while rate_low > target_rate and offset_low > -100:
         offset_low -= 10
         rate_low = compute_rate_fn(offset_low)
     
-    # Expand upper bound if needed
-    while rate_high > target_rate and offset_high < 100:
+    # If high rate is too LOW, push offset_high up (increases rate)
+    while rate_high < target_rate and offset_high < 100:
         offset_high += 10
         rate_high = compute_rate_fn(offset_high)
     
-    # Binary search
+    # Binary search: rate_low <= target <= rate_high
     for _ in range(max_iterations):
         offset_mid = (offset_low + offset_high) / 2
         rate = compute_rate_fn(offset_mid)
         if rate < target_rate:
-            offset_low = offset_mid
+            offset_low = offset_mid  # Need higher offset for more missing
         else:
             offset_high = offset_mid
     
@@ -190,7 +193,7 @@ def apply_mar(
     strength : float
         Dependency strength (higher = stronger dependency)
     base_rate : float
-        Minimum probability to avoid all-zeros
+        Minimum probability to avoid all-zeros (should be < missing_rate)
     direction : str
         "positive" (high driver -> high missing) or "negative"
     rng : np.random.Generator, optional
@@ -207,6 +210,9 @@ def apply_mar(
     if driver_dims is None:
         driver_dims = [0]
     
+    # Cap base_rate to avoid conflicts with low missing_rate
+    base_rate = min(base_rate, missing_rate * 0.5)
+    
     mask = np.ones_like(X, dtype=bool)
     
     # Get eligible positions
@@ -220,15 +226,21 @@ def apply_mar(
     # Compute driver signal
     if X.ndim == 2:
         driver = X[:, driver_dims].mean(axis=1, keepdims=True)
+        # Normalize globally for 2D
+        driver_std = np.nanstd(driver)
+        if driver_std > 1e-10:
+            driver_norm = (driver - np.nanmean(driver)) / driver_std
+        else:
+            driver_norm = np.zeros_like(driver)
     else:  # 3D (N, T, D)
         driver = X[:, :, driver_dims].mean(axis=2, keepdims=True)
-    
-    # Normalize driver (handle constant signals)
-    driver_std = np.nanstd(driver)
-    if driver_std > 1e-10:
-        driver_norm = (driver - np.nanmean(driver)) / driver_std
-    else:
+        # Normalize per participant for 3D (more consistent across subjects)
         driver_norm = np.zeros_like(driver)
+        for n in range(X.shape[0]):
+            driver_n = driver[n]
+            driver_std = np.nanstd(driver_n)
+            if driver_std > 1e-10:
+                driver_norm[n] = (driver_n - np.nanmean(driver_n)) / driver_std
     
     # Compute probabilities using sigmoid
     if direction == "negative":
@@ -248,11 +260,11 @@ def apply_mar(
     probs = 1 / (1 + np.exp(-(strength * driver_norm + offset)))
     probs = np.maximum(probs, base_rate)
     probs_full = np.broadcast_to(probs, X.shape).copy()
+    probs_full[~eligible] = 0  # Zero out non-eligible before sampling
     
-    # Sample missingness only at eligible positions
+    # Sample missingness
     mask_samples = rng.random(X.shape)
     mask = mask_samples > probs_full
-    mask[~eligible] = True  # Keep non-eligible as observed
     mask[existing_nans] = False  # Mark existing NaNs as missing
     
     return mask
@@ -345,11 +357,11 @@ def apply_mnar(
     
     # Compute final probabilities
     probs = 1 / (1 + np.exp(-(strength * score + offset)))
+    probs[~eligible] = 0  # Zero out non-eligible before sampling
     
-    # Sample missingness only at eligible positions
+    # Sample missingness
     mask_samples = rng.random(X.shape)
     mask = mask_samples > probs
-    mask[~eligible] = True  # Keep non-eligible as observed
     mask[existing_nans] = False  # Mark existing NaNs as missing
     
     return mask
