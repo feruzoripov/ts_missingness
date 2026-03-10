@@ -1,13 +1,14 @@
 """Missingness mechanism implementations."""
 
+from __future__ import annotations
+
 import numpy as np
-from typing import Optional, Union, List
 
 
 def _get_eligible_mask(
     X: np.ndarray,
     existing_nans: np.ndarray,
-    target: Union[str, List[int]] = "all"
+    target: str | list[int] = "all"
 ) -> np.ndarray:
     """Get mask of eligible positions for missingness injection.
     
@@ -127,8 +128,8 @@ def apply_mcar(
     X: np.ndarray,
     missing_rate: float,
     existing_nans: np.ndarray,
-    target: Union[str, List[int]] = "all",
-    rng: Optional[np.random.Generator] = None,
+    target: str | list[int] = "all",
+    rng: np.random.Generator | None = None,
     **kwargs
 ) -> np.ndarray:
     """Apply MCAR (Missing Completely At Random) mechanism.
@@ -206,12 +207,12 @@ def apply_mar(
     X: np.ndarray,
     missing_rate: float,
     existing_nans: np.ndarray,
-    driver_dims: Optional[List[int]] = None,
-    target: Union[str, List[int]] = "all",
+    driver_dims: list[int] | None = None,
+    target: str | list[int] = "all",
     strength: float = 2.0,
     base_rate: float = 0.01,
     direction: str = "positive",
-    rng: Optional[np.random.Generator] = None,
+    rng: np.random.Generator | None = None,
     **kwargs
 ) -> np.ndarray:
     """Apply MAR (Missing At Random) mechanism.
@@ -314,13 +315,11 @@ def apply_mar(
             driver_norm = np.zeros_like(driver)
     else:  # 3D (N, T, D)
         driver = X[:, :, driver_dims].mean(axis=2, keepdims=True)
-        # Normalize per participant for 3D (more consistent across subjects)
-        driver_norm = np.zeros_like(driver)
-        for n in range(X.shape[0]):
-            driver_n = driver[n]
-            driver_std = np.nanstd(driver_n)
-            if driver_std > 1e-10:
-                driver_norm[n] = (driver_n - np.nanmean(driver_n)) / driver_std
+        # Vectorized per-participant normalization for 3D
+        driver_means = np.nanmean(driver, axis=1, keepdims=True)
+        driver_stds = np.nanstd(driver, axis=1, keepdims=True)
+        driver_stds = np.where(driver_stds > 1e-10, driver_stds, 1.0)
+        driver_norm = (driver - driver_means) / driver_stds
     
     # Compute probabilities using sigmoid
     if direction == "negative":
@@ -358,9 +357,9 @@ def apply_mnar(
     missing_rate: float,
     existing_nans: np.ndarray,
     mnar_mode: str = "extreme",
-    target: Union[str, List[int]] = "all",
+    target: str | list[int] = "all",
     strength: float = 2.0,
-    rng: Optional[np.random.Generator] = None,
+    rng: np.random.Generator | None = None,
     **kwargs
 ) -> np.ndarray:
     """Apply MNAR (Missing Not At Random) mechanism.
@@ -435,12 +434,11 @@ def apply_mnar(
         stds = np.where(stds > 1e-10, stds, 1.0)  # Avoid division by zero
         X_norm = (X - means) / stds
     else:  # 3D (N, T, D)
-        # Vectorized normalization for 3D (per sample, per dimension)
-        for n in range(X.shape[0]):
-            means = np.nanmean(X[n], axis=0, keepdims=True)
-            stds = np.nanstd(X[n], axis=0, keepdims=True)
-            stds = np.where(stds > 1e-10, stds, 1.0)
-            X_norm[n] = (X[n] - means) / stds
+        # Vectorized per-sample, per-dimension normalization for 3D
+        means = np.nanmean(X, axis=1, keepdims=True)
+        stds = np.nanstd(X, axis=1, keepdims=True)
+        stds = np.where(stds > 1e-10, stds, 1.0)
+        X_norm = (X - means) / stds
     
     # Compute score based on mode
     if mnar_mode == "high":

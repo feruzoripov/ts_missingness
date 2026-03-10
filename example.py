@@ -38,11 +38,11 @@ actual_rate = (~mask).sum() / mask.size
 print(f"   Target rate: 0.10, Actual rate: {actual_rate:.4f}")
 print(f"   Extreme values more likely to be missing")
 
-# Example 4: Block missingness - 20% with 60-timestep blocks
+# Example 4: Block missingness - 20% with contiguous blocks
 print("\n4. Block missingness: 20% in contiguous segments")
 X_missing, mask = simulate_missingness(
     X, "mcar", missing_rate=0.20, seed=42,
-    block=True, block_len=10, block_density=0.7
+    pattern="block", block_len=10, block_density=0.7
 )
 actual_rate = (~mask).sum() / mask.size
 print(f"   Target rate: 0.20, Actual rate: {actual_rate:.4f}")

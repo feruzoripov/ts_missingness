@@ -1,7 +1,8 @@
 """Core API for missingness simulation."""
 
+from __future__ import annotations
+
 import numpy as np
-from typing import Tuple, Dict, List, Optional, Union, Any
 from .mechanisms import MECHANISMS
 from .patterns import PATTERNS
 
@@ -10,10 +11,10 @@ def simulate_missingness(
     X: np.ndarray,
     mechanism: str,
     missing_rate: float,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     pattern: str = "pointwise",
     **kwargs
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Simulate missingness in time-series data.
     
     This function separates two concepts:
@@ -152,10 +153,10 @@ def simulate_missingness(
 def simulate_many_rates(
     X: np.ndarray,
     mechanism: str,
-    rates: List[float],
-    seed: Optional[int] = None,
+    rates: list[float],
+    seed: int | None = None,
     **kwargs
-) -> Dict[float, Tuple[np.ndarray, np.ndarray]]:
+) -> dict[float, tuple[np.ndarray, np.ndarray]]:
     """Simulate missingness at multiple rates.
     
     Parameters
@@ -211,7 +212,7 @@ class MissingnessSimulator:
         self,
         mechanism: str,
         missing_rate: float,
-        seed: Optional[int] = None,
+        seed: int | None = None,
         **config
     ):
         self.mechanism = mechanism
@@ -219,7 +220,7 @@ class MissingnessSimulator:
         self.seed = seed
         self.config = config
     
-    def generate(self, X: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def generate(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Generate missingness for input data.
         
         Parameters

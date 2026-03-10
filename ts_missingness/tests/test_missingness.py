@@ -477,3 +477,63 @@ class TestPatternAPI:
         
         with pytest.raises(ValueError, match="Unknown pattern"):
             simulate_missingness(X, "mcar", 0.15, pattern="invalid")
+
+
+class TestExtremeRates:
+    """Test calibration accuracy at extreme missing rates."""
+
+    @pytest.mark.parametrize("rate", [0.01, 0.02, 0.05])
+    def test_mcar_low_rates(self, rate):
+        X = np.random.default_rng(42).standard_normal((200, 5))
+        _, mask = simulate_missingness(X, "mcar", rate, seed=42)
+        actual = (~mask).sum() / mask.size
+        assert abs(actual - rate) < 0.01
+
+    @pytest.mark.parametrize("rate", [0.50, 0.70, 0.90])
+    def test_mcar_high_rates(self, rate):
+        X = np.random.default_rng(42).standard_normal((200, 5))
+        _, mask = simulate_missingness(X, "mcar", rate, seed=42)
+        actual = (~mask).sum() / mask.size
+        assert abs(actual - rate) < 0.01
+
+    @pytest.mark.parametrize("rate", [0.01, 0.05, 0.50, 0.90])
+    def test_mar_extreme_rates(self, rate):
+        X = np.random.default_rng(42).standard_normal((200, 5))
+        _, mask = simulate_missingness(X, "mar", rate, seed=42, driver_dims=[0])
+        actual = (~mask).sum() / mask.size
+        assert abs(actual - rate) < 0.05
+
+    @pytest.mark.parametrize("rate", [0.01, 0.05, 0.50, 0.90])
+    def test_mnar_extreme_rates(self, rate):
+        X = np.random.default_rng(42).standard_normal((200, 5))
+        _, mask = simulate_missingness(X, "mnar", rate, seed=42, mnar_mode="extreme")
+        actual = (~mask).sum() / mask.size
+        assert abs(actual - rate) < 0.05
+
+
+class TestNumericalStability:
+    """Test numerical stability with extreme parameters."""
+
+    def test_high_strength_mar(self):
+        X = np.random.default_rng(42).standard_normal((200, 5))
+        _, mask = simulate_missingness(
+            X, "mar", 0.5, seed=42, driver_dims=[0], strength=10.0
+        )
+        actual = (~mask).sum() / mask.size
+        assert abs(actual - 0.5) < 0.1
+
+    def test_high_strength_mnar(self):
+        X = np.random.default_rng(42).standard_normal((200, 5))
+        _, mask = simulate_missingness(
+            X, "mnar", 0.5, seed=42, mnar_mode="extreme", strength=10.0
+        )
+        actual = (~mask).sum() / mask.size
+        assert abs(actual - 0.5) < 0.1
+
+    def test_extreme_data_values(self):
+        X = np.random.default_rng(42).standard_normal((100, 5)) * 1000
+        _, mask = simulate_missingness(
+            X, "mnar", 0.2, seed=42, mnar_mode="extreme", strength=5.0
+        )
+        actual = (~mask).sum() / mask.size
+        assert abs(actual - 0.2) < 0.1

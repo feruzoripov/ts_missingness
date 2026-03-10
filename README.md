@@ -131,10 +131,13 @@ X_miss, mask = simulate_missingness(
     block_len=10,         # 10-step dropout periods
     seed=42
 )
-)
 
 print("Actual missing rate:", (~mask).mean())
 ```
+
+---
+
+> **Note**: The `block=True` keyword still works for backward compatibility, but the explicit `pattern="block"` API is preferred.
 
 ---
 

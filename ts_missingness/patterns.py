@@ -1,13 +1,14 @@
 """Missing data patterns (HOW data is missing)."""
 
+from __future__ import annotations
+
 import numpy as np
-from typing import Tuple, Optional
 
 
 def apply_pointwise_pattern(
     mask: np.ndarray,
-    shape: Tuple[int, ...] = None,
-    rng: Optional[np.random.Generator] = None,
+    shape: tuple[int, ...] | None = None,
+    rng: np.random.Generator | None = None,
     **kwargs
 ) -> np.ndarray:
     """Apply point-wise (scattered) missingness pattern.
@@ -34,10 +35,10 @@ def apply_pointwise_pattern(
 
 def apply_block_pattern(
     mask: np.ndarray,
-    shape: Tuple[int, ...],
+    shape: tuple[int, ...],
     block_len: int = 10,
     block_density: float = 0.7,
-    rng: Optional[np.random.Generator] = None,
+    rng: np.random.Generator | None = None,
     **kwargs
 ) -> np.ndarray:
     """Apply block (contiguous) missingness pattern.
@@ -113,7 +114,7 @@ def apply_block_pattern(
 
 def _add_blocks(
     mask: np.ndarray,
-    shape: Tuple[int, ...],
+    shape: tuple[int, ...],
     block_len: int,
     n_target: int,
     rng: np.random.Generator
@@ -134,26 +135,38 @@ def _add_blocks(
         attempts += 1
         
         # Randomly select sample (if 3D), dimension, and start time
-        if N > 1:
-            n_idx = rng.integers(0, N)
-        else:
-            n_idx = 0
-        
+        n_idx = rng.integers(0, N) if N > 1 else 0
         d_idx = rng.integers(0, D)
         t_start = rng.integers(0, max(1, T - block_len + 1))
         t_end = min(t_start + block_len, T)
         
-        # Apply block
-        if len(shape) == 2:
-            block_mask = mask[t_start:t_end, d_idx]
-            n_can_add = block_mask.sum()  # Count currently observed
-            mask[t_start:t_end, d_idx] = False
-        else:  # 3D
-            block_mask = mask[n_idx, t_start:t_end, d_idx]
-            n_can_add = block_mask.sum()
-            mask[n_idx, t_start:t_end, d_idx] = False
+        # Limit block length to not overshoot target
+        remaining = n_target - n_added
         
-        n_added += n_can_add
+        if len(shape) == 2:
+            block_slice = mask[t_start:t_end, d_idx]
+        else:
+            block_slice = mask[n_idx, t_start:t_end, d_idx]
+        
+        n_can_add = block_slice.sum()  # Count currently observed
+        
+        # If this block would overshoot, truncate it
+        if n_can_add > remaining:
+            observed_positions = np.where(block_slice)[0]
+            keep_count = n_can_add - remaining  # How many to keep observed
+            # Only mask 'remaining' of the observed positions
+            to_mask = observed_positions[keep_count:]
+            if len(shape) == 2:
+                mask[t_start + to_mask, d_idx] = False
+            else:
+                mask[n_idx, t_start + to_mask, d_idx] = False
+            n_added += remaining
+        else:
+            if len(shape) == 2:
+                mask[t_start:t_end, d_idx] = False
+            else:
+                mask[n_idx, t_start:t_end, d_idx] = False
+            n_added += n_can_add
     
     return mask
 

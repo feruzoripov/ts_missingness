@@ -5,6 +5,6 @@ authors:
     given-names: "Feruz"
     orcid: "https://orcid.org/0009-0001-4303-0512"
 title: "Time-Series Missingness Simulation Library"
-version: 0.1.0
+version: 0.2.0
 date-released: 2026-02-21
 url: "https://github.com/feruzoripov/ts_missingness"
