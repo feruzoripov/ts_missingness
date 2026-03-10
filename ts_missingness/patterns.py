@@ -171,11 +171,242 @@ def _add_blocks(
     return mask
 
 
+def apply_monotone_pattern(
+    mask: np.ndarray,
+    shape: tuple[int, ...],
+    rng: np.random.Generator | None = None,
+    **kwargs
+) -> np.ndarray:
+    """Apply monotone missingness pattern.
+
+    Once a dimension goes missing at time t, it stays missing for all t' > t.
+    Models participant dropout in longitudinal studies and clinical trials.
+
+    The mechanism mask determines *which* dimensions drop out and roughly
+    *when* (earlier missing probability → earlier dropout). This pattern
+    enforces the monotone constraint on top of that.
+
+    For each (sample, dimension) series the dropout time is the *first*
+    missing position produced by the mechanism. Everything from that point
+    onward is set to missing, and everything before it is set to observed.
+
+    The total missing count is adjusted to match the mechanism's original
+    count by shifting dropout times earlier or later while preserving the
+    monotone constraint.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Initial boolean mask from mechanism (True=observed, False=missing)
+    shape : tuple
+        Shape of the data
+    rng : np.random.Generator, optional
+        Random number generator (not used, kept for API consistency)
+
+    Returns
+    -------
+    mask : np.ndarray
+        Modified mask with monotone constraint enforced
+    """
+    n_target_missing = int((~mask).sum())
+
+    if n_target_missing == 0:
+        return mask
+
+    is_2d = len(shape) == 2
+
+    if is_2d:
+        T, D = shape
+        N = 1
+        # Reshape to 3D for uniform handling: (1, T, D)
+        mask_3d = mask[np.newaxis, :, :]
+    else:
+        N, T, D = shape
+        mask_3d = mask
+
+    # Compute initial dropout times from the mechanism mask.
+    # dropout_times[n, d] = first missing time, or T if never missing.
+    dropout_times = np.full((N, D), T, dtype=int)
+    for n in range(N):
+        for d in range(D):
+            missing_t = np.where(~mask_3d[n, :, d])[0]
+            if len(missing_t) > 0:
+                dropout_times[n, d] = missing_t[0]
+
+    def _build_monotone_mask(dt):
+        """Build a monotone mask from dropout times array."""
+        m = np.ones((N, T, D), dtype=bool)
+        for n in range(N):
+            for d in range(D):
+                if dt[n, d] < T:
+                    m[n, dt[n, d]:, d] = False
+        return m
+
+    def _count_missing(dt):
+        """Count total missing entries for given dropout times."""
+        total = 0
+        for n in range(N):
+            for d in range(D):
+                if dt[n, d] < T:
+                    total += T - dt[n, d]
+        return total
+
+    n_current = _count_missing(dropout_times)
+
+    # Adjust by shifting dropout times to match target count.
+    # Each shift of one dropout time by 1 step changes count by 1.
+    max_iters = abs(n_current - n_target_missing) + 10
+
+    if n_current > n_target_missing:
+        # Too many missing — push dropout times later (increase them)
+        for _ in range(max_iters):
+            if _count_missing(dropout_times) <= n_target_missing:
+                break
+            # Find series with earliest dropout (most room to push later)
+            active = dropout_times < T
+            if not active.any():
+                break
+            # Among active series, pick the one with earliest dropout
+            candidates = np.argwhere(active)
+            earliest_idx = candidates[
+                dropout_times[candidates[:, 0], candidates[:, 1]].argmin()
+            ]
+            n_i, d_i = earliest_idx
+            dropout_times[n_i, d_i] += 1
+
+    elif n_current < n_target_missing:
+        # Too few missing — push dropout times earlier (decrease them)
+        for _ in range(max_iters):
+            if _count_missing(dropout_times) >= n_target_missing:
+                break
+            # Find series with latest dropout (most room to push earlier)
+            active = dropout_times > 0
+            if not active.any():
+                break
+            candidates = np.argwhere(active)
+            latest_idx = candidates[
+                dropout_times[candidates[:, 0], candidates[:, 1]].argmax()
+            ]
+            n_i, d_i = latest_idx
+            dropout_times[n_i, d_i] -= 1
+
+    new_mask = _build_monotone_mask(dropout_times)
+
+    if is_2d:
+        return new_mask[0]
+    return new_mask
+
+
+def apply_temporal_decay_pattern(
+    mask: np.ndarray,
+    shape: tuple[int, ...],
+    decay_rate: float = 3.0,
+    decay_center: float = 0.7,
+    rng: np.random.Generator | None = None,
+    **kwargs
+) -> np.ndarray:
+    """Apply temporal decay missingness pattern.
+
+    Missingness probability increases over time, modeling sensor degradation,
+    battery drain, or participant fatigue. Early timesteps have low
+    missingness; later timesteps have high missingness.
+
+    Uses a sigmoid ramp over the time axis:
+
+        w(t) = σ(decay_rate × (t_norm - decay_center))
+
+    where t_norm ∈ [0, 1] is the normalized time position. The mechanism
+    mask is then resampled with time-weighted probabilities to preserve
+    the overall missing count.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Initial boolean mask from mechanism (True=observed, False=missing)
+    shape : tuple
+        Shape of the data
+    decay_rate : float
+        Steepness of the temporal ramp (higher = sharper transition).
+        Default 3.0 gives a smooth S-curve.
+    decay_center : float
+        Normalized time position (0-1) where missingness reaches 50%.
+        Default 0.7 means most missingness concentrates in the last 30%.
+    rng : np.random.Generator, optional
+        Random number generator for reproducibility
+
+    Returns
+    -------
+    mask : np.ndarray
+        Modified mask with temporally increasing missingness
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    n_target_missing = (~mask).sum()
+    if n_target_missing == 0:
+        return mask
+
+    if len(shape) == 2:
+        T, D = shape
+    else:
+        _, T, D = shape
+
+    # Build time weights using sigmoid ramp
+    t_norm = np.linspace(0, 1, T)
+    weights_1d = 1 / (1 + np.exp(-decay_rate * (t_norm - decay_center)))
+    # Ensure minimum weight so early timesteps aren't completely immune
+    weights_1d = np.maximum(weights_1d, 0.01)
+
+    # Broadcast weights to full data shape
+    if len(shape) == 2:
+        weights = np.broadcast_to(weights_1d[:, np.newaxis], shape).copy()
+    else:  # 3D
+        weights = np.broadcast_to(
+            weights_1d[np.newaxis, :, np.newaxis], shape
+        ).copy()
+
+    # Start with all observed, then sample n_target_missing positions
+    # weighted by temporal decay
+    new_mask = np.ones_like(mask, dtype=bool)
+
+    # Preserve existing NaN positions (where both masks agree on missing)
+    existing_missing = ~mask
+    # Positions eligible for temporal resampling: not already forced missing
+    # by existing NaNs that the mechanism preserved
+    eligible = np.ones_like(mask, dtype=bool)
+
+    # Flatten for weighted sampling
+    flat_weights = weights.ravel() * eligible.ravel().astype(float)
+
+    # Normalize
+    weight_sum = flat_weights.sum()
+    if weight_sum < 1e-10:
+        return mask  # Can't resample, return original
+
+    flat_probs = flat_weights / weight_sum
+
+    # Sample without replacement
+    n_to_sample = min(int(n_target_missing), len(flat_probs))
+    chosen = rng.choice(
+        len(flat_probs), size=n_to_sample, replace=False, p=flat_probs
+    )
+
+    flat_mask = new_mask.ravel()
+    flat_mask[chosen] = False
+    new_mask = flat_mask.reshape(shape)
+
+    return new_mask
+
+
 # Pattern registry
 PATTERNS = {
     "pointwise": apply_pointwise_pattern,
-    "point": apply_pointwise_pattern,  # Alias
-    "scattered": apply_pointwise_pattern,  # Alias
+    "point": apply_pointwise_pattern,       # Alias
+    "scattered": apply_pointwise_pattern,   # Alias
     "block": apply_block_pattern,
-    "contiguous": apply_block_pattern,  # Alias
+    "contiguous": apply_block_pattern,      # Alias
+    "monotone": apply_monotone_pattern,
+    "dropout": apply_monotone_pattern,      # Alias
+    "decay": apply_temporal_decay_pattern,
+    "degradation": apply_temporal_decay_pattern,  # Alias
 }

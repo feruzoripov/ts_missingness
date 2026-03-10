@@ -5,7 +5,7 @@ for imputation benchmarking.
 
 Separates two concepts:
 1. MECHANISMS (why data is missing): MCAR, MAR, MNAR
-2. PATTERNS (how data is missing): pointwise, block
+2. PATTERNS (how data is missing): pointwise, block, monotone, decay
 """
 
 from .core import simulate_missingness, simulate_many_rates, MissingnessSimulator

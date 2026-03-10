@@ -537,3 +537,293 @@ class TestNumericalStability:
         )
         actual = (~mask).sum() / mask.size
         assert abs(actual - 0.2) < 0.1
+
+
+class TestMonotonePattern:
+    """Test monotone (dropout) missingness pattern."""
+
+    def test_monotone_constraint_2d(self):
+        """Once a dimension goes missing, it should stay missing."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.20, seed=42, pattern="monotone"
+        )
+
+        # For each dimension, verify monotone: no observed after first missing
+        for d in range(5):
+            col = mask[:, d]
+            missing_positions = np.where(~col)[0]
+            if len(missing_positions) > 0:
+                dropout_t = missing_positions[0]
+                # Everything after dropout should be missing
+                assert not col[dropout_t:].any(), (
+                    f"Dim {d}: found observed values after dropout at t={dropout_t}"
+                )
+
+    def test_monotone_constraint_3d(self):
+        """Monotone should work with 3D data."""
+        X = np.random.default_rng(42).standard_normal((5, 100, 4))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.25, seed=42, pattern="monotone"
+        )
+
+        for n in range(5):
+            for d in range(4):
+                col = mask[n, :, d]
+                missing_positions = np.where(~col)[0]
+                if len(missing_positions) > 0:
+                    dropout_t = missing_positions[0]
+                    assert not col[dropout_t:].any()
+
+    def test_monotone_preserves_approximate_rate(self):
+        """Monotone should preserve approximately the same missing rate."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.20, seed=42, pattern="monotone"
+        )
+
+        actual_rate = (~mask).sum() / mask.size
+        # Monotone reshuffles missingness, rate may shift somewhat
+        assert abs(actual_rate - 0.20) < 0.10
+
+    def test_monotone_with_mar(self):
+        """Monotone should work with MAR mechanism."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        _, mask = simulate_missingness(
+            X, "mar", 0.20, seed=42, pattern="monotone", driver_dims=[0]
+        )
+
+        # Verify monotone constraint holds
+        for d in range(5):
+            col = mask[:, d]
+            missing_positions = np.where(~col)[0]
+            if len(missing_positions) > 0:
+                dropout_t = missing_positions[0]
+                assert not col[dropout_t:].any()
+
+    def test_dropout_alias(self):
+        """'dropout' should be an alias for monotone."""
+        X = np.random.default_rng(42).standard_normal((100, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.15, seed=42, pattern="dropout"
+        )
+
+        assert mask.shape == X.shape
+
+
+class TestTemporalDecayPattern:
+    """Test temporal decay (degradation) missingness pattern."""
+
+    def test_decay_increases_over_time(self):
+        """Later timesteps should have more missingness than earlier ones."""
+        X = np.random.default_rng(42).standard_normal((500, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.30, seed=42, pattern="decay",
+            decay_rate=5.0, decay_center=0.5
+        )
+
+        T = X.shape[0]
+        first_quarter = (~mask[:T // 4]).sum()
+        last_quarter = (~mask[3 * T // 4:]).sum()
+
+        assert last_quarter > first_quarter, (
+            f"Last quarter ({last_quarter}) should have more missing "
+            f"than first quarter ({first_quarter})"
+        )
+
+    def test_decay_preserves_total_missing(self):
+        """Decay should preserve approximately the target missing count."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.20, seed=42, pattern="decay"
+        )
+
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.20) < 0.02
+
+    def test_decay_3d(self):
+        """Decay should work with 3D data."""
+        X = np.random.default_rng(42).standard_normal((5, 200, 4))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.25, seed=42, pattern="decay",
+            decay_rate=4.0, decay_center=0.6
+        )
+
+        assert mask.shape == X.shape
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.25) < 0.02
+
+    def test_decay_with_mnar(self):
+        """Decay should work with MNAR mechanism."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        _, mask = simulate_missingness(
+            X, "mnar", 0.20, seed=42, pattern="decay",
+            mnar_mode="extreme"
+        )
+
+        assert mask.shape == X.shape
+
+    def test_degradation_alias(self):
+        """'degradation' should be an alias for decay."""
+        X = np.random.default_rng(42).standard_normal((100, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.15, seed=42, pattern="degradation"
+        )
+
+        assert mask.shape == X.shape
+
+    def test_decay_center_controls_timing(self):
+        """Lower decay_center should shift missingness earlier."""
+        X = np.random.default_rng(42).standard_normal((500, 5))
+
+        _, mask_early = simulate_missingness(
+            X, "mcar", 0.30, seed=42, pattern="decay",
+            decay_rate=5.0, decay_center=0.3
+        )
+        _, mask_late = simulate_missingness(
+            X, "mcar", 0.30, seed=42, pattern="decay",
+            decay_rate=5.0, decay_center=0.8
+        )
+
+        T = X.shape[0]
+        # With early center, first half should have more missing
+        early_first_half = (~mask_early[:T // 2]).sum()
+        late_first_half = (~mask_late[:T // 2]).sum()
+
+        assert early_first_half > late_first_half
+
+
+class TestMARDriverWeights:
+    """Test MAR weighted multi-driver combination."""
+
+    def test_driver_weights_basic(self):
+        """MAR with driver_weights should work without errors."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        _, mask = simulate_missingness(
+            X, "mar", 0.20, seed=42,
+            driver_dims=[0, 1], driver_weights=[0.8, 0.2]
+        )
+
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.20) < 0.05
+
+    def test_driver_weights_normalized(self):
+        """Unnormalized weights should be auto-normalized."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        # These should produce the same result (both normalize to [0.8, 0.2])
+        _, mask1 = simulate_missingness(
+            X, "mar", 0.20, seed=42,
+            driver_dims=[0, 1], driver_weights=[0.8, 0.2]
+        )
+        _, mask2 = simulate_missingness(
+            X, "mar", 0.20, seed=42,
+            driver_dims=[0, 1], driver_weights=[4.0, 1.0]
+        )
+
+        np.testing.assert_array_equal(mask1, mask2)
+
+    def test_driver_weights_single_driver_dominates(self):
+        """Heavily weighted driver should dominate missingness pattern."""
+        # Create data where dim 0 and dim 1 have opposite patterns
+        rng = np.random.default_rng(42)
+        X = rng.standard_normal((300, 4))
+        X[:150, 0] = -2  # dim 0: low first half
+        X[150:, 0] = 2   # dim 0: high second half
+        X[:150, 1] = 2   # dim 1: high first half (opposite)
+        X[150:, 1] = -2  # dim 1: low second half
+
+        # Weight dim 0 heavily
+        _, mask_d0 = simulate_missingness(
+            X, "mar", 0.30, seed=42,
+            driver_dims=[0, 1], driver_weights=[0.99, 0.01],
+            strength=3.0
+        )
+
+        # Weight dim 1 heavily
+        _, mask_d1 = simulate_missingness(
+            X, "mar", 0.30, seed=42,
+            driver_dims=[0, 1], driver_weights=[0.01, 0.99],
+            strength=3.0
+        )
+
+        # With dim 0 dominant: more missing in second half (high values)
+        missing_d0_first = (~mask_d0[:150]).sum()
+        missing_d0_second = (~mask_d0[150:]).sum()
+
+        # With dim 1 dominant: more missing in first half (high values)
+        missing_d1_first = (~mask_d1[:150]).sum()
+        missing_d1_second = (~mask_d1[150:]).sum()
+
+        # The dominant driver should flip which half has more missing
+        assert missing_d0_second > missing_d0_first
+        assert missing_d1_first > missing_d1_second
+
+    def test_driver_weights_length_mismatch(self):
+        """Should raise error if weights length doesn't match dims."""
+        X = np.random.default_rng(42).standard_normal((100, 5))
+
+        with pytest.raises(ValueError, match="driver_weights length"):
+            simulate_missingness(
+                X, "mar", 0.15, seed=42,
+                driver_dims=[0, 1], driver_weights=[0.5]
+            )
+
+    def test_driver_weights_negative(self):
+        """Should raise error for negative weights."""
+        X = np.random.default_rng(42).standard_normal((100, 5))
+
+        with pytest.raises(ValueError, match="non-negative"):
+            simulate_missingness(
+                X, "mar", 0.15, seed=42,
+                driver_dims=[0, 1], driver_weights=[0.5, -0.5]
+            )
+
+    def test_driver_weights_all_zero(self):
+        """Should raise error if all weights are zero."""
+        X = np.random.default_rng(42).standard_normal((100, 5))
+
+        with pytest.raises(ValueError, match="must not all be zero"):
+            simulate_missingness(
+                X, "mar", 0.15, seed=42,
+                driver_dims=[0, 1], driver_weights=[0.0, 0.0]
+            )
+
+    def test_none_weights_equals_equal_weights(self):
+        """None weights should behave like equal weights (mean)."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        _, mask_none = simulate_missingness(
+            X, "mar", 0.20, seed=42,
+            driver_dims=[0, 1]
+        )
+        _, mask_equal = simulate_missingness(
+            X, "mar", 0.20, seed=42,
+            driver_dims=[0, 1], driver_weights=[0.5, 0.5]
+        )
+
+        np.testing.assert_array_equal(mask_none, mask_equal)
+
+    def test_driver_weights_3d(self):
+        """Driver weights should work with 3D data."""
+        X = np.random.default_rng(42).standard_normal((5, 100, 4))
+
+        _, mask = simulate_missingness(
+            X, "mar", 0.20, seed=42,
+            driver_dims=[0, 1], driver_weights=[0.7, 0.3]
+        )
+
+        assert mask.shape == X.shape
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.20) < 0.05

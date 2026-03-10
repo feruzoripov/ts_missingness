@@ -208,6 +208,7 @@ def apply_mar(
     missing_rate: float,
     existing_nans: np.ndarray,
     driver_dims: list[int] | None = None,
+    driver_weights: list[float] | None = None,
     target: str | list[int] = "all",
     strength: float = 2.0,
     base_rate: float = 0.01,
@@ -223,6 +224,15 @@ def apply_mar(
     a driver variable; masking is then sampled independently across eligible
     features at each time step.
     
+    When multiple driver dimensions are specified, the driver signal is
+    computed as a weighted linear combination:
+    
+        driver_t = Σ_k  w_k × X_{t,k}
+    
+    where w_k are the (normalized) driver_weights. This allows different
+    observed variables to contribute differently to missingness probability.
+    If driver_weights is None, all drivers contribute equally (simple mean).
+    
     Parameters
     ----------
     X : np.ndarray
@@ -234,6 +244,10 @@ def apply_mar(
         Boolean mask of existing NaNs (should be np.isnan(X) from original data)
     driver_dims : list[int], optional
         Dimensions that drive missingness (default: first dimension)
+    driver_weights : list[float], optional
+        Weights for each driver dimension. Must have same length as
+        driver_dims. Weights are normalized to sum to 1.
+        Default: equal weights (simple mean).
     target : str or list[int]
         "all" (default) or list of dimension indices to mask
     strength : float
@@ -255,6 +269,20 @@ def apply_mar(
     
     if driver_dims is None:
         driver_dims = [0]
+    
+    # Validate and normalize driver_weights
+    if driver_weights is not None:
+        if len(driver_weights) != len(driver_dims):
+            raise ValueError(
+                f"driver_weights length ({len(driver_weights)}) must match "
+                f"driver_dims length ({len(driver_dims)})"
+            )
+        if any(w < 0 for w in driver_weights):
+            raise ValueError("driver_weights must be non-negative")
+        w_sum = sum(driver_weights)
+        if w_sum < 1e-10:
+            raise ValueError("driver_weights must not all be zero")
+        driver_weights = [w / w_sum for w in driver_weights]
     
     # Validate strength
     if strength < 0:
@@ -304,9 +332,15 @@ def apply_mar(
         mask[existing_nans] = False
         return mask
     
-    # Compute driver signal
+    # Compute driver signal (weighted linear combination)
     if X.ndim == 2:
-        driver = X[:, driver_dims].mean(axis=1, keepdims=True)
+        if driver_weights is None:
+            driver = X[:, driver_dims].mean(axis=1, keepdims=True)
+        else:
+            w = np.array(driver_weights)
+            driver = (X[:, driver_dims] * w[np.newaxis, :]).sum(
+                axis=1, keepdims=True
+            )
         # Normalize globally for 2D
         driver_std = np.nanstd(driver)
         if driver_std > 1e-10:
@@ -314,7 +348,13 @@ def apply_mar(
         else:
             driver_norm = np.zeros_like(driver)
     else:  # 3D (N, T, D)
-        driver = X[:, :, driver_dims].mean(axis=2, keepdims=True)
+        if driver_weights is None:
+            driver = X[:, :, driver_dims].mean(axis=2, keepdims=True)
+        else:
+            w = np.array(driver_weights)
+            driver = (X[:, :, driver_dims] * w[np.newaxis, np.newaxis, :]).sum(
+                axis=2, keepdims=True
+            )
         # Vectorized per-participant normalization for 3D
         driver_means = np.nanmean(driver, axis=1, keepdims=True)
         driver_stds = np.nanstd(driver, axis=1, keepdims=True)
