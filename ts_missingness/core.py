@@ -41,8 +41,10 @@ def simulate_missingness(
         - "block": Contiguous segments (sensor dropout)
         - "monotone": Once missing, stays missing (participant dropout)
         - "decay": Missingness increases over time (sensor degradation)
+        - "markov": Temporally dependent flickering (intermittent sensor failure)
         Aliases: "point"/"scattered" for pointwise; "contiguous" for block;
-                 "dropout" for monotone; "degradation" for decay
+                 "dropout" for monotone; "degradation" for decay;
+                 "flickering" for markov
     **kwargs : dict
         Mechanism-specific parameters:
         
@@ -87,6 +89,11 @@ def simulate_missingness(
                 Steepness of temporal ramp (higher = sharper transition)
             decay_center : float, default=0.7
                 Normalized time (0-1) where missingness reaches 50%
+        
+        Markov pattern:
+            persist : float, default=0.8
+                Probability of staying missing once entered [0, 1).
+                Higher = longer bursts.
     
     Returns
     -------

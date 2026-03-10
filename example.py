@@ -100,8 +100,33 @@ actual_rate = (~mask).sum() / mask.size
 print(f"   Target rate: 0.20, Actual rate: {actual_rate:.4f}")
 print(f"   80% weight on dim 0, 20% weight on dim 1")
 
-# Example 10: Evaluation workflow
-print("\n10. Evaluation workflow for imputation")
+# Example 10: Markov chain pattern (intermittent sensor failure)
+print("\n10. Markov chain: intermittent sensor flickering")
+X_missing, mask = simulate_missingness(
+    X_long, "mcar", missing_rate=0.20, seed=42,
+    pattern="markov", persist=0.8
+)
+actual_rate = (~mask).sum() / mask.size
+# Measure average burst length
+burst_lens = []
+for d in range(X_long.shape[1]):
+    col = ~mask[:, d]
+    run = 0
+    for v in col:
+        if v:
+            run += 1
+        else:
+            if run > 0:
+                burst_lens.append(run)
+            run = 0
+    if run > 0:
+        burst_lens.append(run)
+avg_burst = np.mean(burst_lens) if burst_lens else 0
+print(f"   Target rate: 0.20, Actual rate: {actual_rate:.4f}")
+print(f"   Persist: 0.8, Avg burst length: {avg_burst:.1f}")
+
+# Example 11: Evaluation workflow
+print("\n11. Evaluation workflow for imputation")
 X_ground_truth = X.copy()
 X_missing, mask = simulate_missingness(X, "mcar", 0.20, seed=42)
 

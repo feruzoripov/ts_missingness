@@ -2,7 +2,7 @@
 
 A Python library for simulating realistic missingness in time-series data for imputation benchmarking.
 
-Explicitly separates **mechanisms** (why data is missing: MCAR, MAR, MNAR) from **patterns** (how data is missing: pointwise, block, monotone, decay). Any mechanism can be combined with any pattern. Supports 2D and 3D arrays, exact or calibrated rate control, weighted multi-driver MAR, and full reproducibility.
+Explicitly separates **mechanisms** (why data is missing: MCAR, MAR, MNAR) from **patterns** (how data is missing: pointwise, block, monotone, decay, markov). Any mechanism can be combined with any pattern. Supports 2D and 3D arrays, exact or calibrated rate control, weighted multi-driver MAR, and full reproducibility.
 
 ---
 
@@ -46,6 +46,12 @@ X_miss, mask = simulate_missingness(
     decay_rate=5.0, decay_center=0.6
 )
 
+# MCAR: intermittent flickering with Markov chain dependence
+X_miss, mask = simulate_missingness(
+    X, "mcar", 0.20, seed=42,
+    pattern="markov", persist=0.8
+)
+
 print(f"Actual missing rate: {(~mask).mean():.4f}")
 ```
 
@@ -71,6 +77,7 @@ The library separates two orthogonal concerns:
 | `block` | `contiguous` | Contiguous segments (sensor dropout) |
 | `monotone` | `dropout` | Once missing, stays missing (participant dropout) |
 | `decay` | `degradation` | Missingness increases over time (sensor degradation) |
+| `markov` | `flickering` | Temporally dependent bursts (intermittent sensor failure) |
 
 Any mechanism can be combined with any pattern:
 
@@ -82,6 +89,8 @@ Any mechanism can be combined with any pattern:
 | MAR + decay | Sensor degrades faster under load |
 | MNAR + monotone | Extreme readings cause permanent sensor failure |
 | MNAR + pointwise | Sensor saturates at extreme values |
+| MCAR + markov | Random intermittent connectivity drops |
+| MAR + markov | Load-dependent flickering sensor |
 
 ---
 
@@ -261,6 +270,44 @@ X_miss, mask = simulate_missingness(
 
 ---
 
+### Markov Chain
+
+Missingness at time $t$ depends on whether $t-1$ was missing, creating realistic "flickering" on/off patterns. Governed by a 2-state Markov chain per (sample, dimension) series:
+
+$$P(\text{missing at } t \mid \text{observed at } t\!-\!1) = p_{\text{onset}}$$
+$$P(\text{missing at } t \mid \text{missing at } t\!-\!1) = p_{\text{persist}}$$
+
+The `persist` parameter controls stickiness — how likely a missing state is to continue. `p_onset` is automatically calibrated from the target missing rate using the stationary distribution:
+
+$$\pi_{\text{missing}} = \frac{p_{\text{onset}}}{p_{\text{onset}} + 1 - p_{\text{persist}}}$$
+
+```python
+# Moderate bursts (avg ~5 steps)
+X_miss, mask = simulate_missingness(
+    X, "mcar", 0.20, seed=42,
+    pattern="markov", persist=0.8
+)
+
+# Long bursts (avg ~20 steps)
+X_miss, mask = simulate_missingness(
+    X, "mcar", 0.20, seed=42,
+    pattern="markov", persist=0.95
+)
+
+# Rapid flickering (avg ~1.5 steps)
+X_miss, mask = simulate_missingness(
+    X, "mcar", 0.20, seed=42,
+    pattern="markov", persist=0.3
+)
+```
+
+**Parameters:**
+- `persist`: probability of staying missing once entered, range [0, 1) (default: `0.8`). Higher = longer bursts.
+
+**Use cases:** intermittent connectivity, unstable sensor connections, WiFi/Bluetooth dropouts, flickering wearable sensors.
+
+---
+
 ## Data Shapes
 
 The library supports both 2D and 3D arrays:
@@ -313,7 +360,7 @@ X_miss, mask = sim.generate(X)
 from ts_missingness import MECHANISMS, PATTERNS
 
 print(list(MECHANISMS.keys()))  # ['mcar', 'mar', 'mnar']
-print(list(PATTERNS.keys()))    # ['pointwise', 'point', 'scattered', 'block', 'contiguous', 'monotone', 'dropout', 'decay', 'degradation']
+print(list(PATTERNS.keys()))    # ['pointwise', 'point', 'scattered', 'block', 'contiguous', 'monotone', 'dropout', 'decay', 'degradation', 'markov', 'flickering']
 ```
 
 ---
@@ -353,7 +400,7 @@ print(f"RMSE: {rmse:.4f}, MAE: {mae:.4f}")
 | `mechanism` | `str` | `"mcar"`, `"mar"`, or `"mnar"` |
 | `missing_rate` | `float` | Target fraction missing, 0.0–1.0 (clipped automatically) |
 | `seed` | `int \| None` | Random seed for reproducibility |
-| `pattern` | `str` | `"pointwise"`, `"block"`, `"monotone"`, or `"decay"` |
+| `pattern` | `str` | `"pointwise"`, `"block"`, `"monotone"`, `"decay"`, or `"markov"` |
 
 **Mechanism-specific kwargs:**
 
@@ -375,6 +422,7 @@ print(f"RMSE: {rmse:.4f}, MAE: {mae:.4f}")
 | `block_density` | block | `0.7` | Fraction of missingness in blocks |
 | `decay_rate` | decay | `3.0` | Steepness of temporal ramp |
 | `decay_center` | decay | `0.7` | Normalized time of 50% crossover |
+| `persist` | markov | `0.8` | Probability of staying missing [0, 1) |
 
 **Returns:** `(X_missing, mask)` — data with NaNs inserted and boolean mask.
 
@@ -408,7 +456,7 @@ assert np.isnan(X_miss[:10, 0]).all()  # Preserved
 pytest ts_missingness/tests/ -v
 ```
 
-68 tests covering all mechanisms, patterns, edge cases, extreme rates, numerical stability, and validation.
+77 tests covering all mechanisms, patterns, edge cases, extreme rates, numerical stability, and validation.
 
 ---
 

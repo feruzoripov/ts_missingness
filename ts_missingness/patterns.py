@@ -398,6 +398,126 @@ def apply_temporal_decay_pattern(
     return new_mask
 
 
+def apply_markov_pattern(
+    mask: np.ndarray,
+    shape: tuple[int, ...],
+    persist: float = 0.8,
+    rng: np.random.Generator | None = None,
+    **kwargs
+) -> np.ndarray:
+    """Apply Markov chain temporal dependence pattern.
+
+    Missingness at time t depends on whether t-1 was missing, creating
+    realistic "flickering" on/off patterns common in wearable sensor data.
+
+    Governed by a 2-state Markov chain per (sample, dimension) series:
+
+        P(missing at t | observed at t-1) = p_onset
+        P(missing at t | missing  at t-1) = p_persist
+
+    The persist parameter controls "stickiness" — how likely a missing
+    state is to continue. Higher values create longer missing bursts;
+    lower values create rapid flickering.
+
+    p_onset is automatically calibrated from the target missing count
+    using the stationary distribution:
+
+        π_missing = p_onset / (p_onset + 1 - p_persist)
+
+    Solving for p_onset:
+
+        p_onset = π_missing × (1 - p_persist) / (1 - π_missing)
+
+    The chain is simulated independently for each (sample, dimension)
+    series. The mechanism mask's total missing count is preserved
+    approximately.
+
+    Parameters
+    ----------
+    mask : np.ndarray
+        Initial boolean mask from mechanism (True=observed, False=missing)
+    shape : tuple
+        Shape of the data
+    persist : float
+        Probability of staying in the missing state once entered.
+        Range [0, 1). Higher = longer missing bursts.
+        Default 0.8 creates moderate-length bursts.
+        Must be strictly less than 1.0.
+    rng : np.random.Generator, optional
+        Random number generator for reproducibility
+
+    Returns
+    -------
+    mask : np.ndarray
+        Modified mask with Markov-chain temporal dependence
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    if not 0.0 <= persist < 1.0:
+        raise ValueError("persist must be in [0, 1), got {:.4f}".format(persist))
+
+    n_target_missing = int((~mask).sum())
+    if n_target_missing == 0:
+        return mask
+
+    is_2d = len(shape) == 2
+
+    if is_2d:
+        T, D = shape
+        N = 1
+    else:
+        N, T, D = shape
+
+    total_elements = N * T * D
+    if total_elements == 0:
+        return mask
+
+    # Target missing rate (global)
+    pi_missing = n_target_missing / total_elements
+
+    # Calibrate p_onset from stationary distribution:
+    # π = p_onset / (p_onset + 1 - persist)
+    # => p_onset = π × (1 - persist) / (1 - π)
+    if pi_missing >= 1.0:
+        # Everything missing
+        return np.zeros_like(mask, dtype=bool)
+    if pi_missing <= 0.0:
+        return np.ones_like(mask, dtype=bool)
+
+    p_onset = pi_missing * (1.0 - persist) / (1.0 - pi_missing)
+    # Clamp to valid probability
+    p_onset = float(np.clip(p_onset, 0.0, 1.0))
+
+    # Simulate Markov chain for each (sample, dimension) series
+    new_mask = np.ones(shape, dtype=bool)
+
+    if is_2d:
+        for d in range(D):
+            # Initialize: use mechanism's first timestep state
+            is_missing = rng.random() < pi_missing
+            for t in range(T):
+                if is_missing:
+                    new_mask[t, d] = False
+                    # Transition: stay missing with prob persist
+                    is_missing = rng.random() < persist
+                else:
+                    # Transition: become missing with prob p_onset
+                    is_missing = rng.random() < p_onset
+    else:  # 3D
+        for n in range(N):
+            for d in range(D):
+                is_missing = rng.random() < pi_missing
+                for t in range(T):
+                    if is_missing:
+                        new_mask[n, t, d] = False
+                        is_missing = rng.random() < persist
+                    else:
+                        is_missing = rng.random() < p_onset
+
+    return new_mask
+
+
 # Pattern registry
 PATTERNS = {
     "pointwise": apply_pointwise_pattern,
@@ -409,4 +529,6 @@ PATTERNS = {
     "dropout": apply_monotone_pattern,      # Alias
     "decay": apply_temporal_decay_pattern,
     "degradation": apply_temporal_decay_pattern,  # Alias
+    "markov": apply_markov_pattern,
+    "flickering": apply_markov_pattern,     # Alias
 }

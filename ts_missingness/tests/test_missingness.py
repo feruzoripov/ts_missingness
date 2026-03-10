@@ -827,3 +827,135 @@ class TestMARDriverWeights:
         assert mask.shape == X.shape
         actual_rate = (~mask).sum() / mask.size
         assert abs(actual_rate - 0.20) < 0.05
+
+
+class TestMarkovPattern:
+    """Test Markov chain temporal dependence pattern."""
+
+    def test_markov_approximate_rate(self):
+        """Markov pattern should produce approximately the target rate."""
+        X = np.random.default_rng(42).standard_normal((500, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.20, seed=42, pattern="markov", persist=0.8
+        )
+
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.20) < 0.05
+
+    def test_markov_creates_bursts(self):
+        """Higher persist should create longer missing bursts."""
+        X = np.random.default_rng(42).standard_normal((500, 5))
+
+        def avg_burst_length(mask):
+            lengths = []
+            for d in range(mask.shape[-1]):
+                col = ~mask[:, d] if mask.ndim == 2 else ~mask[0, :, d]
+                run = 0
+                for v in col:
+                    if v:
+                        run += 1
+                    else:
+                        if run > 0:
+                            lengths.append(run)
+                        run = 0
+                if run > 0:
+                    lengths.append(run)
+            return np.mean(lengths) if lengths else 0
+
+        _, mask_low = simulate_missingness(
+            X, "mcar", 0.20, seed=42, pattern="markov", persist=0.3
+        )
+        _, mask_high = simulate_missingness(
+            X, "mcar", 0.20, seed=42, pattern="markov", persist=0.9
+        )
+
+        avg_low = avg_burst_length(mask_low)
+        avg_high = avg_burst_length(mask_high)
+
+        assert avg_high > avg_low, (
+            f"High persist ({avg_high:.1f}) should have longer bursts "
+            f"than low persist ({avg_low:.1f})"
+        )
+
+    def test_markov_3d(self):
+        """Markov pattern should work with 3D data."""
+        X = np.random.default_rng(42).standard_normal((5, 200, 4))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.25, seed=42, pattern="markov", persist=0.7
+        )
+
+        assert mask.shape == X.shape
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.25) < 0.10
+
+    def test_markov_with_mar(self):
+        """Markov pattern should work with MAR mechanism."""
+        X = np.random.default_rng(42).standard_normal((300, 5))
+
+        _, mask = simulate_missingness(
+            X, "mar", 0.20, seed=42,
+            pattern="markov", driver_dims=[0], persist=0.7
+        )
+
+        assert mask.shape == X.shape
+
+    def test_markov_with_mnar(self):
+        """Markov pattern should work with MNAR mechanism."""
+        X = np.random.default_rng(42).standard_normal((300, 5))
+
+        _, mask = simulate_missingness(
+            X, "mnar", 0.20, seed=42,
+            pattern="markov", mnar_mode="extreme", persist=0.7
+        )
+
+        assert mask.shape == X.shape
+
+    def test_flickering_alias(self):
+        """'flickering' should be an alias for markov."""
+        X = np.random.default_rng(42).standard_normal((100, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.15, seed=42, pattern="flickering", persist=0.6
+        )
+
+        assert mask.shape == X.shape
+
+    def test_markov_persist_zero(self):
+        """persist=0 should produce no temporal dependence (pointwise-like)."""
+        X = np.random.default_rng(42).standard_normal((500, 5))
+
+        _, mask = simulate_missingness(
+            X, "mcar", 0.20, seed=42, pattern="markov", persist=0.0
+        )
+
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.20) < 0.05
+
+    def test_markov_invalid_persist(self):
+        """Should raise error for persist >= 1.0 or < 0."""
+        X = np.random.default_rng(42).standard_normal((100, 5))
+
+        with pytest.raises(ValueError, match="persist"):
+            simulate_missingness(
+                X, "mcar", 0.15, seed=42, pattern="markov", persist=1.0
+            )
+
+        with pytest.raises(ValueError, match="persist"):
+            simulate_missingness(
+                X, "mcar", 0.15, seed=42, pattern="markov", persist=-0.1
+            )
+
+    def test_markov_reproducible(self):
+        """Same seed should produce identical Markov masks."""
+        X = np.random.default_rng(42).standard_normal((200, 5))
+
+        _, mask1 = simulate_missingness(
+            X, "mcar", 0.20, seed=99, pattern="markov", persist=0.8
+        )
+        _, mask2 = simulate_missingness(
+            X, "mcar", 0.20, seed=99, pattern="markov", persist=0.8
+        )
+
+        np.testing.assert_array_equal(mask1, mask2)
