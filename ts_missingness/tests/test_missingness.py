@@ -361,3 +361,119 @@ class TestFinalValidation:
         assert (~mask[:, 0]).sum() > 0
         assert (~mask[:, 1]).sum() == 0
         assert (~mask[:, 4]).sum() > 0
+
+
+class TestPatternAPI:
+    """Test explicit pattern parameter."""
+    
+    def test_pointwise_pattern_explicit(self):
+        """Should work with explicit pattern='pointwise'."""
+        X = np.random.randn(100, 5)
+        
+        X_missing, mask = simulate_missingness(
+            X, "mcar", 0.15, seed=42, pattern="pointwise"
+        )
+        
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.15) < 0.01
+    
+    def test_block_pattern_explicit(self):
+        """Should work with explicit pattern='block'."""
+        X = np.random.randn(200, 5)
+        
+        X_missing, mask = simulate_missingness(
+            X, "mcar", 0.20, seed=42, 
+            pattern="block", block_len=10, block_density=0.7
+        )
+        
+        # Should have some contiguous blocks
+        has_blocks = False
+        for d in range(5):
+            missing_seq = ~mask[:, d]
+            runs = []
+            current_run = 0
+            for val in missing_seq:
+                if val:
+                    current_run += 1
+                else:
+                    if current_run > 0:
+                        runs.append(current_run)
+                    current_run = 0
+            if current_run > 0:
+                runs.append(current_run)
+            
+            if runs and max(runs) >= 3:  # At least some blocks of length >= 3
+                has_blocks = True
+                break
+        
+        assert has_blocks, "Should have at least one block of length >= 3"
+    
+    def test_pattern_aliases(self):
+        """Should accept pattern aliases."""
+        X = np.random.randn(100, 5)
+        
+        # Test "point" alias
+        X_missing1, mask1 = simulate_missingness(
+            X, "mcar", 0.15, seed=42, pattern="point"
+        )
+        
+        # Test "scattered" alias
+        X_missing2, mask2 = simulate_missingness(
+            X, "mcar", 0.15, seed=42, pattern="scattered"
+        )
+        
+        # Test "contiguous" alias for block
+        X_missing3, mask3 = simulate_missingness(
+            X, "mcar", 0.15, seed=42, pattern="contiguous", block_len=5
+        )
+        
+        # All should work without errors
+        assert X_missing1.shape == X.shape
+        assert X_missing2.shape == X.shape
+        assert X_missing3.shape == X.shape
+    
+    def test_backward_compatibility_block_true(self):
+        """Old block=True API should still work."""
+        X = np.random.randn(200, 5)
+        
+        # Old API
+        X_missing, mask = simulate_missingness(
+            X, "mcar", 0.20, seed=42,
+            block=True, block_len=10, block_density=0.7
+        )
+        
+        # Should create blocks
+        actual_rate = (~mask).sum() / mask.size
+        assert abs(actual_rate - 0.20) < 0.05
+    
+    def test_mechanism_pattern_combinations(self):
+        """Should support all mechanism + pattern combinations."""
+        X = np.random.randn(100, 5)
+        
+        combinations = [
+            ("mcar", "pointwise"),
+            ("mcar", "block"),
+            ("mar", "pointwise"),
+            ("mar", "block"),
+            ("mnar", "pointwise"),
+            ("mnar", "block"),
+        ]
+        
+        for mech, patt in combinations:
+            kwargs = {}
+            if mech == "mar":
+                kwargs["driver_dims"] = [0]
+            
+            X_missing, mask = simulate_missingness(
+                X, mech, 0.15, seed=42, pattern=patt, **kwargs
+            )
+            
+            assert X_missing.shape == X.shape
+            assert mask.shape == X.shape
+    
+    def test_invalid_pattern(self):
+        """Should raise error for invalid pattern."""
+        X = np.random.randn(100, 5)
+        
+        with pytest.raises(ValueError, match="Unknown pattern"):
+            simulate_missingness(X, "mcar", 0.15, pattern="invalid")

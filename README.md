@@ -52,6 +52,54 @@ error = np.mean((X[missing_idx] - X_imputed[missing_idx])**2)
 
 ---
 
+## Key Concept: Mechanisms vs. Patterns
+
+This library explicitly separates two fundamental concepts:
+
+**Missingness Mechanisms (WHY data is missing)**  
+Describes the probabilistic relationship between missingness and data values:
+- **MCAR**: Independent of all data
+- **MAR**: Depends on observed variables  
+- **MNAR**: Depends on the missing values themselves
+
+**Missingness Patterns (HOW data is missing)**  
+Describes the spatial/temporal structure of missingness:
+- **Pointwise**: Individual scattered points (default)
+- **Block**: Contiguous segments (sensor dropout)
+
+**Combining Mechanisms and Patterns**  
+Any mechanism can use any pattern:
+- MCAR + pointwise: Random scattered missing
+- MCAR + block: Random sensor dropout periods
+- MAR + block: Activity-dependent sensor dropout
+- MNAR + block: Value-dependent sensor failure
+
+```python
+# Explicit API (v2.0+)
+X_missing, mask = simulate_missingness(
+    X,
+    mechanism="mar",      # WHY: depends on driver
+    missing_rate=0.25,
+    pattern="block",      # HOW: contiguous segments
+    driver_dims=[0],
+    block_len=10,
+    seed=42
+)
+
+# Backward compatible API (still works)
+X_missing, mask = simulate_missingness(
+    X,
+    mechanism="mar",
+    missing_rate=0.25,
+    driver_dims=[0],
+    block=True,           # Automatically sets pattern="block"
+    block_len=10,
+    seed=42
+)
+```
+
+---
+
 ## Installation
 
 ```bash
@@ -68,8 +116,21 @@ from ts_missingness import simulate_missingness
 
 X = np.random.randn(1000, 6)
 
+# Simple: MCAR with pointwise pattern (default)
 X_miss, mask = simulate_missingness(
-    X, mechanism="mar", missing_rate=0.2, seed=42, driver_dims=[0]
+    X, mechanism="mcar", missing_rate=0.15, seed=42
+)
+
+# Advanced: MAR with block pattern (sensor dropout depends on activity)
+X_miss, mask = simulate_missingness(
+    X, 
+    mechanism="mar",      # WHY: depends on driver dimension
+    missing_rate=0.25, 
+    pattern="block",      # HOW: contiguous segments
+    driver_dims=[0],      # Activity level drives missingness
+    block_len=10,         # 10-step dropout periods
+    seed=42
+)
 )
 
 print("Actual missing rate:", (~mask).mean())
@@ -85,13 +146,16 @@ print("Actual missing rate:", (~mask).mean())
 Missingness is independent of both observed and unobserved data.
 
 **Mathematical model**
-```
-P(M_ij = 1) = ρ
-```
+
+$$P(M_{ij} = 1) = \rho$$
+
+where:
+- $M_{ij}$ is the missingness indicator for position $(i,j)$
+- $\rho$ is the target missing rate
 
 **Implementation**
 - Uniform random sampling without replacement
-- Exactly ⌊n × ρ⌋ positions are masked among eligible entries
+- Exactly $\lfloor n \times \rho \rfloor$ positions are masked among eligible entries
 - Guarantees precise missing-rate control
 
 **Use cases**
@@ -106,20 +170,22 @@ P(M_ij = 1) = ρ
 **Definition**  
 Missingness depends on **observed variables**, but **not** on the missing value itself.
 
-**Model**
-```
-P(M_ij = 1 | X) = σ(α · z_i + β)
+**Mathematical model**
 
-z_i = (driver_i - μ) / σ
-σ(x) = 1 / (1 + exp(-x))
-```
+$$P(M_{ij} = 1 \mid X) = \sigma(\alpha \cdot z_i + \beta)$$
+
+where:
+- $z_i = \frac{\text{driver}_i - \mu}{\sigma}$ (normalized driver signal)
+- $\sigma(x) = \frac{1}{1 + e^{-x}}$ (sigmoid function)
+- $\alpha$ = strength parameter
+- $\beta$ = calibrated offset
 
 **Procedure**
 1. Compute a driver signal from specified dimensions
-2. Normalize the driver
-3. Convert to probabilities using a sigmoid
-4. Calibrate offset β via binary search to match target missing rate ρ
-5. Sample Bernoulli(p_ij) at eligible positions
+2. Normalize the driver: $z_i = \frac{\text{driver}_i - \mu}{\sigma}$
+3. Convert to probabilities using sigmoid: $p_i = \sigma(\alpha \cdot z_i + \beta)$
+4. Calibrate offset $\beta$ via binary search to match target missing rate $\rho$
+5. Sample $\text{Bernoulli}(p_{ij})$ at eligible positions
 
 **Use cases**
 - Sensor failure during high activity
@@ -133,23 +199,23 @@ z_i = (driver_i - μ) / σ
 **Definition**  
 Missingness depends on the **value itself** (unobserved when missing). This is the most challenging and least identifiable setting.
 
-**Model**
-```
-P(M_ij = 1 | X_ij) = σ(α · f(z_ij) + β)
+**Mathematical model**
 
-z_ij = (X_ij - μ_j) / σ_j
+$$P(M_{ij} = 1 \mid X_{ij}) = \sigma(\alpha \cdot f(z_{ij}) + \beta)$$
 
-f(z) =  z     (mode="high")
-       -z     (mode="low")
-       |z|    (mode="extreme")
-```
+where:
+- $z_{ij} = \frac{X_{ij} - \mu_j}{\sigma_j}$ (per-dimension normalization)
+- $f(z) = \begin{cases} z & \text{if mode="high"} \\ -z & \text{if mode="low"} \\ |z| & \text{if mode="extreme"} \end{cases}$
+- $\sigma(x) = \frac{1}{1 + e^{-x}}$ (sigmoid function)
+- $\alpha$ = strength parameter
+- $\beta$ = calibrated offset
 
 **Procedure**
-1. Normalize each dimension independently
-2. Compute score based on mode
-3. Apply sigmoid to obtain probabilities
-4. Calibrate offset β to achieve target missing rate
-5. Sample Bernoulli(p_ij)
+1. Normalize each dimension independently: $z_{ij} = \frac{X_{ij} - \mu_j}{\sigma_j}$
+2. Compute score based on mode: $s_{ij} = f(z_{ij})$
+3. Apply sigmoid to obtain probabilities: $p_{ij} = \sigma(\alpha \cdot s_{ij} + \beta)$
+4. Calibrate offset $\beta$ to achieve target missing rate $\rho$
+5. Sample $\text{Bernoulli}(p_{ij})$
 
 **Use cases**
 - Sensor saturation at extremes

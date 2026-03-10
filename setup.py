@@ -7,7 +7,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="ts_missingness",
-    version="0.1.0",
+    version="0.2.0",
     author="Feruz Oripov",
     author_email="foripov@arizona.edu",
     description="Time-series missingness simulation for imputation benchmarking",

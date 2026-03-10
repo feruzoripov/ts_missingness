@@ -3,7 +3,7 @@
 import numpy as np
 from typing import Tuple, Dict, List, Optional, Union, Any
 from .mechanisms import MECHANISMS
-from .blocks import apply_block_missingness
+from .patterns import PATTERNS
 
 
 def simulate_missingness(
@@ -11,21 +11,34 @@ def simulate_missingness(
     mechanism: str,
     missing_rate: float,
     seed: Optional[int] = None,
+    pattern: str = "pointwise",
     **kwargs
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Simulate missingness in time-series data.
+    
+    This function separates two concepts:
+    1. MECHANISM (why data is missing): MCAR, MAR, MNAR
+    2. PATTERN (how data is missing): pointwise, block
     
     Parameters
     ----------
     X : np.ndarray
         Input data of shape (T, D) or (N, T, D)
     mechanism : str
-        One of "mcar", "mar", "mnar"
+        Missingness mechanism (WHY data is missing):
+        - "mcar": Missing Completely At Random
+        - "mar": Missing At Random (depends on other variables)
+        - "mnar": Missing Not At Random (depends on value itself)
     missing_rate : float
         Target fraction of missing values (0.0 to 1.0)
         Applied to eligible (non-NaN) entries
     seed : int, optional
         Random seed for reproducibility
+    pattern : str, optional
+        Missingness pattern (HOW data is missing):
+        - "pointwise" (default): Scattered individual points
+        - "block": Contiguous segments (sensor dropout)
+        Aliases: "point", "scattered" for pointwise; "contiguous" for block
     **kwargs : dict
         Mechanism-specific parameters:
         
@@ -53,13 +66,13 @@ def simulate_missingness(
             strength : float, default=2.0
                 Dependency strength
         
-        Block missingness (all mechanisms):
-            block : bool, default=False
-                Enable block missingness
+        Pattern-specific parameters:
+        
+        Block pattern:
             block_len : int, default=10
-                Length of each missing block
+                Length of each missing block (in timesteps)
             block_density : float, default=0.7
-                Fraction of missingness in blocks
+                Fraction of missingness in blocks (0.0 to 1.0)
     
     Returns
     -------
@@ -67,6 +80,23 @@ def simulate_missingness(
         Data with NaNs inserted (same shape as X)
     mask : np.ndarray
         Boolean mask (True=observed, False=missing)
+    
+    Examples
+    --------
+    >>> # MCAR with point-wise pattern (default)
+    >>> X_missing, mask = simulate_missingness(X, "mcar", 0.15, seed=42)
+    
+    >>> # MAR with block pattern (sensor dropout depends on activity)
+    >>> X_missing, mask = simulate_missingness(
+    ...     X, "mar", 0.25, seed=42,
+    ...     driver_dims=[0], pattern="block", block_len=10
+    ... )
+    
+    >>> # MNAR with block pattern (extreme values cause sensor failure)
+    >>> X_missing, mask = simulate_missingness(
+    ...     X, "mnar", 0.20, seed=42,
+    ...     mnar_mode="extreme", pattern="block"
+    ... )
     """
     # Create RNG for reproducibility
     rng = np.random.default_rng(seed)
@@ -80,11 +110,25 @@ def simulate_missingness(
     # Clip missing_rate to valid range (allow out-of-range for convenience)
     missing_rate = float(np.clip(missing_rate, 0.0, 1.0))
     
+    # Validate mechanism
     mechanism = mechanism.lower()
     if mechanism not in MECHANISMS:
         raise ValueError(
             f"Unknown mechanism: {mechanism}. "
             f"Must be one of: {list(MECHANISMS.keys())}"
+        )
+    
+    # Validate pattern
+    pattern = pattern.lower()
+    
+    # Backward compatibility: handle old block=True API
+    if kwargs.get("block", False):
+        pattern = "block"
+    
+    if pattern not in PATTERNS:
+        raise ValueError(
+            f"Unknown pattern: {pattern}. "
+            f"Must be one of: {list(PATTERNS.keys())}"
         )
     
     # Copy input
@@ -93,13 +137,11 @@ def simulate_missingness(
     # Identify existing NaNs
     existing_nans = np.isnan(X)
     
-    # Generate mechanism-specific mask using registry
+    # Step 1: Generate mechanism-specific mask (WHY missing)
     mask = MECHANISMS[mechanism](X, missing_rate, existing_nans, rng=rng, **kwargs)
     
-    # Apply block missingness if requested
-    if kwargs.get("block", False):
-        # Block missingness also needs rng for reproducibility
-        mask = apply_block_missingness(mask, X.shape, rng=rng, **kwargs)
+    # Step 2: Apply pattern (HOW missing)
+    mask = PATTERNS[pattern](mask, X.shape, rng=rng, **kwargs)
     
     # Apply mask
     X_missing[~mask] = np.nan
