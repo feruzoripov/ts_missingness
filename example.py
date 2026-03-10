@@ -64,8 +64,44 @@ actual_rate = (~mask).sum() / mask.size
 print(f"   Simulator configured with rate 0.15")
 print(f"   Actual rate: {actual_rate:.4f}")
 
-# Example 7: Evaluation workflow
-print("\n7. Evaluation workflow for imputation")
+# Example 7: Monotone pattern (participant dropout)
+print("\n7. Monotone pattern: participant dropout")
+X_long = np.random.randn(300, 5)
+X_missing, mask = simulate_missingness(
+    X_long, "mcar", missing_rate=0.20, seed=42, pattern="monotone"
+)
+actual_rate = (~mask).sum() / mask.size
+print(f"   Target rate: 0.20, Actual rate: {actual_rate:.4f}")
+for d in range(5):
+    mt = np.where(~mask[:, d])[0]
+    if len(mt) > 0:
+        print(f"   Dim {d}: drops out at t={mt[0]}")
+
+# Example 8: Temporal decay pattern (sensor degradation)
+print("\n8. Temporal decay: sensor degradation over time")
+X_missing, mask = simulate_missingness(
+    X_long, "mcar", missing_rate=0.25, seed=42,
+    pattern="decay", decay_rate=5.0, decay_center=0.6
+)
+actual_rate = (~mask).sum() / mask.size
+T = X_long.shape[0]
+q1_missing = (~mask[:T // 4]).sum()
+q4_missing = (~mask[3 * T // 4:]).sum()
+print(f"   Target rate: 0.25, Actual rate: {actual_rate:.4f}")
+print(f"   First quarter missing: {q1_missing}, Last quarter: {q4_missing}")
+
+# Example 9: MAR with weighted multi-driver
+print("\n9. MAR with weighted drivers (activity + temperature)")
+X_missing, mask = simulate_missingness(
+    X, "mar", missing_rate=0.20, seed=42,
+    driver_dims=[0, 1], driver_weights=[0.8, 0.2], strength=2.0
+)
+actual_rate = (~mask).sum() / mask.size
+print(f"   Target rate: 0.20, Actual rate: {actual_rate:.4f}")
+print(f"   80% weight on dim 0, 20% weight on dim 1")
+
+# Example 10: Evaluation workflow
+print("\n10. Evaluation workflow for imputation")
 X_ground_truth = X.copy()
 X_missing, mask = simulate_missingness(X, "mcar", 0.20, seed=42)
 

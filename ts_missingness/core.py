@@ -39,7 +39,10 @@ def simulate_missingness(
         Missingness pattern (HOW data is missing):
         - "pointwise" (default): Scattered individual points
         - "block": Contiguous segments (sensor dropout)
-        Aliases: "point", "scattered" for pointwise; "contiguous" for block
+        - "monotone": Once missing, stays missing (participant dropout)
+        - "decay": Missingness increases over time (sensor degradation)
+        Aliases: "point"/"scattered" for pointwise; "contiguous" for block;
+                 "dropout" for monotone; "degradation" for decay
     **kwargs : dict
         Mechanism-specific parameters:
         
@@ -50,6 +53,10 @@ def simulate_missingness(
         MAR:
             driver_dims : list[int], required
                 Dimensions that drive missingness
+            driver_weights : list[float], optional
+                Weights for each driver dimension (normalized to sum to 1).
+                Allows different drivers to contribute differently.
+                Default: equal weights (simple mean).
             target : str or list[int]
                 "all" (default) or list of dimension indices to mask
             strength : float, default=2.0
@@ -74,6 +81,12 @@ def simulate_missingness(
                 Length of each missing block (in timesteps)
             block_density : float, default=0.7
                 Fraction of missingness in blocks (0.0 to 1.0)
+        
+        Decay pattern:
+            decay_rate : float, default=3.0
+                Steepness of temporal ramp (higher = sharper transition)
+            decay_center : float, default=0.7
+                Normalized time (0-1) where missingness reaches 50%
     
     Returns
     -------
