@@ -325,7 +325,31 @@ X_miss, mask = simulate_missingness(
 
 Once a dimension goes missing at time $t$, it stays missing for all $t' > t$. Models participant dropout in longitudinal studies and clinical trials.
 
-The mechanism mask determines which dimensions drop out and approximately when. The pattern enforces the monotone constraint and adjusts dropout times to match the target missing count.
+The mechanism mask determines *how much* each dimension should be missing. Dimensions that the mechanism targeted more heavily get earlier dropout times. This preserves the mechanism's influence:
+- Under MCAR, dropout times are roughly uniform with small random variation.
+- Under MAR, dimensions driven by high-valued drivers drop out earlier.
+- Under MNAR, dimensions with more extreme values drop out earlier.
+
+The dropout time $\tau_d$ for each dimension $d$ is computed by allocating the total missing budget proportionally to the mechanism's per-dimension missing density:
+
+$$\tau_d = T - \text{round}\!\left(\frac{\delta_d}{\sum_k \delta_k} \cdot n_{\text{target}}\right)$$
+
+Variable definitions:
+- $\tau_d$ — the dropout time for dimension $d$. All timesteps from $\tau_d$ onward are missing.
+- $T$ — the total number of timesteps.
+- $\delta_d$ — the missing density for dimension $d$ from the mechanism mask, i.e., the fraction of timesteps the mechanism marked as missing in that dimension.
+- $\sum_k \delta_k$ — the sum of densities across all dimensions (used for normalization).
+- $n_{\text{target}}$ — the total number of missing positions to achieve (from the mechanism).
+
+Step-by-step procedure:
+1. The mechanism (MCAR/MAR/MNAR) generates a scattered mask.
+2. For each dimension $d$, compute its missing density $\delta_d$ = (number of missing positions in dim $d$) / $T$.
+3. Allocate the total missing budget $n_{\text{target}}$ across dimensions proportionally to their densities.
+4. Convert each allocation to a dropout time: $\tau_d = T - n_{\text{allocated},d}$.
+5. Fix rounding errors by adjusting the highest/lowest density dimensions by ±1 step.
+6. Build the monotone mask: for each dimension, set all positions from $\tau_d$ onward to missing.
+
+The monotone constraint is strictly enforced: once a dimension drops out, it never comes back. The total missing count matches the mechanism's target exactly.
 
 ```python
 X_miss, mask = simulate_missingness(
