@@ -19,7 +19,15 @@ Each panel shows a (200 timesteps × 8 features) array as a heatmap. The color s
 ## Installation
 
 ```bash
-pip install -e .
+pip install tsgap
+```
+
+Or install from source for development:
+
+```bash
+git clone https://github.com/feruzoripov/tsgap.git
+cd tsgap
+pip install -e ".[dev]"
 ```
 
 Requires Python ≥ 3.9 and NumPy ≥ 1.19.
