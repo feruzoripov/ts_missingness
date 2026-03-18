@@ -27,7 +27,7 @@ affiliations:
   - name: Center for Biomedical Informatics and Biostatistics, University of Arizona, USA
     index: 1
     ror: 03m2x1q45
-  - name: Department of Epidemiology & Biostatistics, University of Arizona, USA
+  - name: Department of Epidemiology and Biostatistics, University of Arizona, USA
     index: 2
     ror: 03m2x1q45
   - name: Department of Electrical and Computer Engineering, University of Arizona, USA
