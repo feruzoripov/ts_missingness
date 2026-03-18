@@ -10,10 +10,31 @@ tags:
 authors:
   - name: Feruz Oripov
     orcid: 0009-0001-4303-0512
+    affiliation: "1, 3"
+  - name: Kseniia Korchagina
+    orcid: 0000-0000-0000-0000
+    affiliation: 1
+  - name: Enock Adu Bonsu
+    orcid: 0000-0000-0000-0000
+    affiliation: 2
+  - name: Ali Bilgin
+    orcid: 0000-0000-0000-0000
+    affiliation: "3, 4"
+  - name: Shravan Aras
+    orcid: 0000-0000-0000-0000
     affiliation: 1
 affiliations:
-  - name: University of Arizona, USA
+  - name: Center for Biomedical Informatics and Biostatistics, University of Arizona, USA
     index: 1
+    ror: 03m2x1q45
+  - name: Department of Epidemiology & Biostatistics, University of Arizona, USA
+    index: 2
+    ror: 03m2x1q45
+  - name: Department of Electrical and Computer Engineering, University of Arizona, USA
+    index: 3
+    ror: 03m2x1q45
+  - name: Department of Biomedical Engineering, University of Arizona, USA
+    index: 4
     ror: 03m2x1q45
 date: 10 March 2026
 bibliography: paper.bib
@@ -106,17 +127,17 @@ reproducibility guarantees beyond manual seed management.
 
 | Feature | TSGap | PyGrinder | mice | Ad-hoc |
 |---------|:-:|:-:|:-:|:-:|
-| MCAR / MAR / MNAR | ✓ | ✓ | ✓ | MCAR only |
-| Mechanism--pattern separation | ✓ | ✗ | ✗ | ✗ |
-| Block pattern | ✓ | ✗ | ✗ | Rare |
-| Monotone pattern | ✓ | ✗ | ✗ | ✗ |
-| Temporal decay pattern | ✓ | ✗ | ✗ | ✗ |
-| Markov chain pattern | ✓ | ✗ | ✗ | ✗ |
-| Rate calibration (MAR/MNAR) | ✓ | ✗ | Partial | ✗ |
-| Weighted multi-driver | ✓ | ✗ | ✓ | ✗ |
-| 3D $(N, T, D)$ native | ✓ | ✗ | ✗ | ✗ |
-| Python | ✓ | ✓ | ✗ (R) | ✓ |
-| Reproducible (seeded RNG) | ✓ | ✓ | ✓ | Varies |
+| MCAR / MAR / MNAR | $\checkmark$ | $\checkmark$ | $\checkmark$ | MCAR only |
+| Mechanism--pattern separation | $\checkmark$ | $\times$ | $\times$ | $\times$ |
+| Block pattern | $\checkmark$ | $\times$ | $\times$ | Rare |
+| Monotone pattern | $\checkmark$ | $\times$ | $\times$ | $\times$ |
+| Temporal decay pattern | $\checkmark$ | $\times$ | $\times$ | $\times$ |
+| Markov chain pattern | $\checkmark$ | $\times$ | $\times$ | $\times$ |
+| Rate calibration (MAR/MNAR) | $\checkmark$ | $\times$ | Partial | $\times$ |
+| Weighted multi-driver | $\checkmark$ | $\times$ | $\checkmark$ | $\times$ |
+| 3D $(N, T, D)$ native | $\checkmark$ | $\times$ | $\times$ | $\times$ |
+| Python | $\checkmark$ | $\checkmark$ | $\times$ (R) | $\checkmark$ |
+| Reproducible (seeded RNG) | $\checkmark$ | $\checkmark$ | $\checkmark$ | Varies |
 
 # Software Design
 
@@ -190,13 +211,14 @@ contribution.
 
 Generative AI (Claude Opus 4.6, Anthropic) was used to assist with code
 generation during the development of `tsgap`. All AI-generated code was carefully
-reviewed, tested, and validated by the author to ensure correctness and
-adherence to the library's design principles. The author assumes full
+reviewed, tested, and validated by the authors to ensure correctness and
+adherence to the library's design principles. The authors assume full
 responsibility for the final implementation.
 
 # Acknowledgements
 
 This work was conducted as part of a master's thesis at the University of
-Arizona.
+Arizona. The authors thank the Center for Biomedical Informatics and
+Biostatistics for providing computational resources and infrastructure support.
 
 # References
